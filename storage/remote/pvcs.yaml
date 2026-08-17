@@ -1,0 +1,37 @@
+# Dynamic PVCs for non-kind clusters. Set STORAGE_CLASS when applying (see Makefile).
+# Sizes match the kind local-PV demo; inode-flood on pvc-fault may not hit 85% on large volumes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-healthy
+  namespace: __APP_NAMESPACE__
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: __STORAGE_CLASS__
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-filling
+  namespace: __APP_NAMESPACE__
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: __STORAGE_CLASS__
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-fault
+  namespace: __APP_NAMESPACE__
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: __STORAGE_CLASS__
+  resources:
+    requests:
+      storage: 100Mi

@@ -1,0 +1,26 @@
+# Injects real write I/O errors (EIO) on pvc-fault via Chaos Mesh FUSE overlay.
+# Targets the fault-injector pod; the canary loop should set pvc_canary_write_success=0.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: pvc-fault-write-eio
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: pvc-monitoring-poc
+spec:
+  action: fault
+  mode: all
+  selector:
+    labelSelectors:
+      app: fault-injector
+    namespaces:
+      - default
+  containerNames:
+    - fault-injector
+  volumePath: /data/fault
+  path: /data/fault/**/*
+  methods:
+    - WRITE
+  errno: 5
+  percent: 100
+  duration: 1h

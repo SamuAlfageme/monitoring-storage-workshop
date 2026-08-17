@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-healthy
+  namespace: default
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-storage
+  volumeName: pv-healthy
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-filling
+  namespace: default
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-storage
+  volumeName: pv-filling
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-fault
+  namespace: default
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-storage
+  volumeName: pv-fault
+  resources:
+    requests:
+      storage: 100Mi

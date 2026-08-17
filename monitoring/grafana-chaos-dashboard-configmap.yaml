@@ -1,0 +1,63 @@
+# Grafana dashboard for Chaos Mesh experiment events (chaosmeshorg-datasource plugin).
+# Requires: make deploy-chaos && make deploy-monitoring (installs plugin + datasource).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-mesh-events-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  chaos-mesh-events.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": { "type": "chaosmeshorg-datasource", "uid": "chaosmesh" },
+          "fieldConfig": { "defaults": {}, "overrides": [] },
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+          "id": 1,
+          "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+          "targets": [
+            {
+              "datasource": { "type": "chaosmeshorg-datasource", "uid": "chaosmesh" },
+              "kind": "IOChaos",
+              "namespace": "default",
+              "limit": 200,
+              "refId": "A"
+            }
+          ],
+          "title": "IOChaos events (default namespace)",
+          "type": "table"
+        },
+        {
+          "datasource": { "type": "chaosmeshorg-datasource", "uid": "chaosmesh" },
+          "fieldConfig": { "defaults": {}, "overrides": [] },
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
+          "id": 2,
+          "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } },
+          "targets": [
+            {
+              "datasource": { "type": "chaosmeshorg-datasource", "uid": "chaosmesh" },
+              "limit": 200,
+              "refId": "A"
+            }
+          ],
+          "title": "All Chaos Mesh events",
+          "type": "table"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["chaos-mesh", "iochaos", "poc"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "Chaos Mesh Events",
+      "uid": "chaos-mesh-events",
+      "version": 1
+    }

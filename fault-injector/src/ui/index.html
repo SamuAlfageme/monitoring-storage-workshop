@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PVC Monitoring POC - Fault Injector</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 24px; background: #0f1419; color: #e6edf3;
+    }
+    h1 { margin-top: 0; color: #58a6ff; }
+    h2 { color: #8b949e; font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .intro { margin-bottom: 24px; color: #8b949e; line-height: 1.6; }
+    .intro a { color: #58a6ff; text-decoration: none; }
+    .intro a:hover { text-decoration: underline; }
+    .intro code { color: #e6edf3; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px;
+    }
+    .card h3 { margin: 0 0 8px; color: #58a6ff; }
+    .meta { font-size: 0.875rem; color: #8b949e; margin-bottom: 12px; }
+    .faults { font-size: 0.8rem; color: #f0883e; margin-bottom: 12px; }
+    .bar-bg { background: #21262d; border-radius: 4px; height: 8px; overflow: hidden; margin: 8px 0; }
+    .bar-fill { background: #238636; height: 100%; transition: width 0.3s; }
+    .bar-fill.warn { background: #d29922; }
+    .bar-fill.crit { background: #f85149; }
+    button {
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; margin: 4px 4px 4px 0;
+      font-size: 0.875rem;
+    }
+    button:hover:not(:disabled) { background: #30363d; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.danger { border-color: #f85149; color: #f85149; }
+    button.danger:hover:not(:disabled) { background: #3d1214; }
+    button.reset { border-color: #238636; color: #3fb950; }
+    .actions { min-height: 32px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #30363d; }
+    th { color: #8b949e; }
+    .status-firing { color: #f85149; }
+    .status-resolved { color: #3fb950; }
+    .alert-row { cursor: pointer; }
+    .alert-row:hover { background: #21262d; }
+    .alert-count { color: #8b949e; font-size: 0.75rem; margin-left: 6px; }
+    .msg { padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: 0.875rem; }
+    .msg.ok { background: #122117; color: #3fb950; }
+    .msg.err { background: #3d1214; color: #f85149; }
+    .chaos-section { margin-bottom: 24px; }
+    .chaos-unavailable { color: #8b949e; }
+    .chaos-ready { color: #3fb950; }
+    .chaos-active { color: #f0883e; font-size: 0.875rem; margin-top: 8px; }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      align-items: center; justify-content: center; z-index: 100; padding: 24px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      max-width: 720px; width: 100%; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px; border-bottom: 1px solid #30363d;
+    }
+    .modal-header h3 { margin: 0; color: #58a6ff; }
+    .modal-body { padding: 16px; overflow-y: auto; }
+    .webhook-entry {
+      border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-bottom: 12px;
+      font-size: 0.8125rem;
+    }
+    .webhook-entry time { color: #8b949e; }
+    .webhook-entry pre {
+      margin: 8px 0 0; padding: 8px; background: #0f1419; border-radius: 4px;
+      overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>PVC Monitoring POC</h1>
+  <p class="intro">
+    Inject storage faults and observe alerts in
+    <a href="http://localhost:9090/alerts" target="_blank">Prometheus</a>,
+    <a href="http://localhost:9093" target="_blank">Alertmanager</a>, and
+    <a href="http://localhost:3000" target="_blank">Grafana</a>.
+    <span style="color:#6e7681">(requires <code>make port-forward</code>)</span>
+  </p>
+
+  <div id="message"></div>
+
+  <div class="card chaos-section" id="chaos-panel">
+    <h3>Chaos Mesh IOChaos</h3>
+    <div class="meta" id="chaos-status-text">Checking Chaos Mesh…</div>
+    <div class="actions" id="chaos-actions" style="display:none">
+      <button type="button" class="danger" data-chaos="io-fault">Write EIO (real I/O fault)</button>
+      <button type="button" data-chaos="io-latency">Write latency (2s)</button>
+      <button type="button" class="reset" data-chaos="reset">Reset IOChaos</button>
+    </div>
+    <div class="meta" id="chaos-experiments"></div>
+  </div>
+
+  <div class="grid" id="pvc-grid"></div>
+
+  <div class="card">
+    <h2>Alert History (from Alertmanager webhooks)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Status</th>
+          <th>Alert</th>
+          <th>Severity</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody id="alert-body"></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="alert-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="alert-modal-title">Alert webhooks</h3>
+        <button type="button" id="alert-modal-close">Close</button>
+      </div>
+      <div class="modal-body" id="alert-modal-body"></div>
+    </div>
+  </div>
+
+  <script>
+    const msgEl = document.getElementById("message");
+    const gridEl = document.getElementById("pvc-grid");
+    const alertModal = document.getElementById("alert-modal");
+    const alertModalTitle = document.getElementById("alert-modal-title");
+    const alertModalBody = document.getElementById("alert-modal-body");
+    let latestStatus = { pvcs: [] };
+    let groupedAlerts = [];
+    const FILL_TARGET_PERCENT = 92;
+
+    const FAULT_ACTIONS = {
+      filling: [
+        {
+          action: "fill-disk",
+          label: "Fill to 92%",
+          buildBody: (pvc) => ({
+            pvc: pvc.pvc,
+            mountPath: pvc.mountPath,
+            targetPercent: FILL_TARGET_PERCENT,
+          }),
+          isDisabled: (pvc) => pvc.usedPercent >= FILL_TARGET_PERCENT,
+        },
+        {
+          action: "clear-fill",
+          label: "Delete contents",
+          danger: true,
+          buildBody: (pvc) => ({
+            pvc: pvc.pvc,
+            mountPath: pvc.mountPath,
+          }),
+          isDisabled: (pvc) => pvc.usedPercent < 1,
+        },
+      ],
+      fault: [
+        {
+          action: "read-only",
+          faultType: "read-only",
+          label: "Make read-only",
+          danger: true,
+          buildBody: (pvc) => ({
+            pvc: pvc.pvc,
+            mountPath: pvc.mountPath,
+          }),
+        },
+        {
+          action: "inode-flood",
+          faultType: "inode-flood",
+          label: "Inode flood",
+          danger: true,
+          buildBody: (pvc) => ({
+            pvc: pvc.pvc,
+            mountPath: pvc.mountPath,
+            targetPercent: 86,
+          }),
+        },
+        {
+          action: "corrupt",
+          faultType: "corrupt",
+          label: "Corrupt file",
+          danger: true,
+          buildBody: (pvc) => ({
+            pvc: pvc.pvc,
+            mountPath: pvc.mountPath,
+            targetFile: "app.db",
+          }),
+        },
+      ],
+    };
+
+    function showMsg(text, ok) {
+      msgEl.innerHTML = `<div class="msg ${ok ? "ok" : "err"}">${text}</div>`;
+      setTimeout(() => { msgEl.innerHTML = ""; }, 5000);
+    }
+
+    async function api(method, path, body) {
+      const opts = { method, headers: { "Content-Type": "application/json" } };
+      if (body !== undefined) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function barClass(pct) {
+      if (pct >= 95) return "crit";
+      if (pct >= 80) return "warn";
+      return "";
+    }
+
+    function formatBytes(b) {
+      if (b < 1024) return b + " B";
+      if (b < 1048576) return (b / 1024).toFixed(1) + " KiB";
+      return (b / 1048576).toFixed(1) + " MiB";
+    }
+
+    function isFaultActive(pvc, faultType) {
+      return (pvc.activeFaults || []).includes(faultType);
+    }
+
+    function renderButtons(pvc) {
+      const actions = FAULT_ACTIONS[pvc.name] || [];
+      const faultButtons = actions
+        .filter((a) => !a.faultType || !isFaultActive(pvc, a.faultType))
+        .map((a) => {
+          const cls = a.danger ? "danger" : "";
+          const disabled = a.isDisabled && a.isDisabled(pvc) ? "disabled" : "";
+          return `<button type="button" class="${cls}" data-action="${a.action}" data-pvc-name="${pvc.name}" ${disabled}>${a.label}</button>`;
+        })
+        .join("");
+
+      const hasActiveFaults = (pvc.activeFaults || []).length > 0;
+      const resetBtn = hasActiveFaults
+        ? `<button type="button" class="reset" data-reset="${pvc.pvc}">Reset</button>`
+        : "";
+
+      if (!faultButtons && !resetBtn) {
+        return `<div class="actions"><span style="color:#8b949e;font-size:0.875rem">No faults active</span></div>`;
+      }
+
+      return `<div class="actions">${faultButtons}${resetBtn}</div>`;
+    }
+
+    function renderPvcs(data) {
+      latestStatus = data;
+      gridEl.innerHTML = data.pvcs.map((pvc) => `
+        <div class="card" data-pvc-name="${pvc.name}">
+          <h3>${pvc.pvc}</h3>
+          <div class="meta">${pvc.mountPath}</div>
+          ${pvc.activeFaults.length ? `<div class="faults">Active faults: ${pvc.activeFaults.join(", ")}</div>` : ""}
+          <div>Usage: ${pvc.usedPercent.toFixed(1)}% (${formatBytes(pvc.usedBytes)} / ${formatBytes(pvc.totalBytes)})</div>
+          ${pvc.totalInodes ? `<div>Inodes: ${pvc.inodeUsedPercent.toFixed(1)}%</div>` : ""}
+          <div class="bar-bg"><div class="bar-fill ${barClass(pvc.usedPercent)}" style="width:${Math.min(pvc.usedPercent, 100)}%"></div></div>
+          ${renderButtons(pvc)}
+        </div>
+      `).join("");
+    }
+
+    function findPvc(name) {
+      return latestStatus.pvcs.find((p) => p.name === name);
+    }
+
+    async function doFault(action, pvcName) {
+      const pvc = findPvc(pvcName);
+      if (!pvc) {
+        showMsg(`Unknown PVC: ${pvcName}`, false);
+        return;
+      }
+
+      const config = (FAULT_ACTIONS[pvcName] || []).find((a) => a.action === action);
+      if (!config) {
+        showMsg(`Unknown action: ${action}`, false);
+        return;
+      }
+
+      if (config.isDisabled && config.isDisabled(pvc)) {
+        showMsg(`${action} is not available for ${pvc.pvc} at current usage`, false);
+        return;
+      }
+
+      if (config.faultType && isFaultActive(pvc, config.faultType)) {
+        showMsg(`${config.faultType} already active on ${pvc.pvc}`, false);
+        await refreshStatus();
+        return;
+      }
+
+      const body = config.buildBody(pvc);
+      showMsg(`Running ${action} on ${body.pvc}…`, true);
+
+      try {
+        const data = await api("POST", `/fault/${action}`, body);
+        if (action === "fill-disk" && data.usedPercent != null) {
+          showMsg(`fill-disk applied to ${body.pvc} (${data.usedPercent.toFixed(1)}% full)`, true);
+        } else if (action === "clear-fill" && data.usedPercent != null) {
+          showMsg(`Contents deleted on ${body.pvc} (${data.usedPercent.toFixed(1)}% used)`, true);
+        } else if (action === "inode-flood" && data.inodeUsedPercent != null) {
+          showMsg(`inode-flood applied to ${body.pvc} (${data.inodeUsedPercent.toFixed(1)}% inodes used)`, true);
+        } else {
+          showMsg(`${action} applied to ${body.pvc}`, true);
+        }
+      } catch (e) {
+        showMsg(e.message, false);
+      } finally {
+        await refreshStatus();
+      }
+    }
+
+    async function doReset(pvc) {
+      try {
+        await api("POST", `/fault/reset/${pvc}`, {});
+        showMsg(`Reset ${pvc}`, true);
+        await refreshStatus();
+      } catch (e) {
+        showMsg(e.message, false);
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const data = await api("GET", "/status");
+        renderPvcs(data);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function refreshChaos() {
+      const statusEl = document.getElementById("chaos-status-text");
+      const actionsEl = document.getElementById("chaos-actions");
+      const experimentsEl = document.getElementById("chaos-experiments");
+      try {
+        const chaos = await api("GET", "/chaos/status");
+        if (chaos.available) {
+          statusEl.innerHTML = `<span class="chaos-ready">Chaos Mesh detected</span> - IOChaos experiments can be applied on <code>pvc-fault</code> (/data/fault)`;
+          actionsEl.style.display = "block";
+          if (chaos.experiments && chaos.experiments.length) {
+            experimentsEl.innerHTML = `<div class="chaos-active">Active: ${chaos.experiments.map((e) => `${e.name} (${e.action})`).join(", ")}</div>`;
+          } else {
+            experimentsEl.innerHTML = "";
+          }
+        } else if (chaos.inCluster) {
+          statusEl.innerHTML = `<span class="chaos-unavailable">Chaos Mesh not ready</span> - ${chaos.reason || "Check install and RBAC"}`;
+          actionsEl.style.display = "none";
+          experimentsEl.innerHTML = "";
+        } else {
+          statusEl.innerHTML = `<span class="chaos-unavailable">${chaos.reason || "Run in-cluster to enable Chaos Mesh controls"}</span>`;
+          actionsEl.style.display = "none";
+          experimentsEl.innerHTML = "";
+        }
+      } catch (e) {
+        statusEl.innerHTML = `<span class="chaos-unavailable">Could not reach /chaos/status</span>`;
+        actionsEl.style.display = "none";
+      }
+    }
+
+    async function doChaos(action) {
+      const paths = {
+        "io-fault": { method: "POST", path: "/chaos/io-fault", label: "IOChaos write EIO" },
+        "io-latency": { method: "POST", path: "/chaos/io-latency", label: "IOChaos write latency" },
+        reset: { method: "POST", path: "/chaos/reset", label: "IOChaos reset" },
+      };
+      const cfg = paths[action];
+      if (!cfg) return;
+      showMsg(`Running ${cfg.label}…`, true);
+      try {
+        await api(cfg.method, cfg.path, {});
+        showMsg(`${cfg.label} applied`, true);
+      } catch (e) {
+        showMsg(e.message, false);
+      } finally {
+        await refreshChaos();
+        await refreshStatus();
+      }
+    }
+
+    function openAlertModal(group) {
+      alertModalTitle.textContent = `${group.alertname} (${group.count} webhook${group.count === 1 ? "" : "s"})`;
+      alertModalBody.innerHTML = group.webhooks.map((w) => `
+        <div class="webhook-entry">
+          <time>${new Date(w.receivedAt).toLocaleString()}</time>
+          <span class="status-${w.status}"> · ${w.status}</span>
+          <span> · ${w.severity}</span>
+          <pre>${escapeHtml(JSON.stringify({
+            alertname: w.alertname,
+            status: w.status,
+            severity: w.severity,
+            summary: w.summary,
+            description: w.description,
+            labels: w.labels,
+          }, null, 2))}</pre>
+        </div>
+      `).join("");
+      alertModal.classList.add("open");
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function refreshAlerts() {
+      try {
+        groupedAlerts = await api("GET", "/alerts/history");
+        const tbody = document.getElementById("alert-body");
+        if (!groupedAlerts.length) {
+          tbody.innerHTML = "<tr><td colspan='5' style='color:#8b949e'>No alerts received yet</td></tr>";
+          return;
+        }
+        tbody.innerHTML = groupedAlerts.slice(0, 20).map((group, index) => `
+          <tr class="alert-row" data-alert-index="${index}">
+            <td>${new Date(group.receivedAt).toLocaleTimeString()}</td>
+            <td class="status-${group.status}">${group.status}</td>
+            <td>${group.alertname}${group.count > 1 ? `<span class="alert-count">×${group.count}</span>` : ""}</td>
+            <td>${group.severity}</td>
+            <td>${group.summary}</td>
+          </tr>
+        `).join("");
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    document.body.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (button) {
+        if (button.dataset.chaos) {
+          doChaos(button.dataset.chaos);
+          return;
+        }
+        if (button.dataset.reset) {
+          doReset(button.dataset.reset);
+          return;
+        }
+        if (button.dataset.action && button.dataset.pvcName) {
+          doFault(button.dataset.action, button.dataset.pvcName);
+          return;
+        }
+      }
+
+      const alertRow = event.target.closest(".alert-row");
+      if (alertRow) {
+        const index = Number(alertRow.dataset.alertIndex);
+        const group = groupedAlerts[index];
+        if (group) {
+          openAlertModal(group);
+        }
+      }
+    });
+
+    document.getElementById("alert-modal-close").addEventListener("click", () => {
+      alertModal.classList.remove("open");
+    });
+
+    alertModal.addEventListener("click", (event) => {
+      if (event.target === alertModal) {
+        alertModal.classList.remove("open");
+      }
+    });
+
+    refreshStatus();
+    refreshChaos();
+    refreshAlerts();
+    setInterval(refreshStatus, 2000);
+    setInterval(refreshChaos, 5000);
+    setInterval(refreshAlerts, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        refreshStatus();
+        refreshChaos();
+        refreshAlerts();
+      }
+    });
+  </script>
+</body>
+</html>

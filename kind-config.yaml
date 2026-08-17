@@ -1,0 +1,16 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: pvc-monitoring-poc
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: /proc
+        containerPath: /host/proc
+        readOnly: true
+      - hostPath: /sys
+        containerPath: /host/sys
+        readOnly: true
+    kubeadmConfigPatches:
+      - |
+        kind: KubeletConfiguration
+        volumeStatsAggPeriod: 10s

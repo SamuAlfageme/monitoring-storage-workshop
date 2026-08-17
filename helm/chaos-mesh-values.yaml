@@ -1,0 +1,27 @@
+# Chaos Mesh values tuned for kind (containerd CRI inside the node).
+# On Apple Silicon, IOChaos/toda is amd64-only. Use native arm64 kind (default) and
+# `make demo-readonly` for I/O demos, or opt into amd64 nodes via `make cluster-up-amd64`.
+chaosDaemon:
+  runtime: containerd
+  socketPath: /run/containerd/containerd.sock
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+dashboard:
+  create: true
+  # POC: no login prompt. Set true for production (use a ServiceAccount token to log in).
+  securityMode: false
+  service:
+    type: ClusterIP
+
+controllerManager:
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi

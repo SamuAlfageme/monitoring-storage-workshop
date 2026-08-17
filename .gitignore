@@ -1,0 +1,5 @@
+fault-injector/k8s/registry-credentials.env
+fault-injector/node_modules/
+fault-injector/dist/
+
+.DS_Store

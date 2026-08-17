@@ -1,0 +1,31 @@
+# RBAC for in-cluster Chaos Mesh IOChaos management from the fault-injector UI/API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fault-injector
+  namespace: __APP_NAMESPACE__
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fault-injector-iochaos
+  namespace: __APP_NAMESPACE__
+rules:
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["iochaos"]
+    verbs: ["get", "list", "create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fault-injector-iochaos
+  namespace: __APP_NAMESPACE__
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fault-injector-iochaos
+subjects:
+  - kind: ServiceAccount
+    name: fault-injector
+    namespace: __APP_NAMESPACE__

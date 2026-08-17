@@ -1,0 +1,26 @@
+# Adds 2s latency to writes on pvc-fault. Useful to observe slow-canary behavior
+# without failing writes outright (canary should still succeed unless timeout).
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: pvc-fault-write-latency
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: pvc-monitoring-poc
+spec:
+  action: latency
+  mode: all
+  selector:
+    labelSelectors:
+      app: fault-injector
+    namespaces:
+      - default
+  containerNames:
+    - fault-injector
+  volumePath: /data/fault
+  path: /data/fault/**/*
+  methods:
+    - WRITE
+  delay: 2s
+  percent: 100
+  duration: 1h
