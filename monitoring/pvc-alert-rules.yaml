@@ -1,0 +1,137 @@
+# PVC integrity alert rules for the monitoring POC.
+#
+# Metric sources (portability):
+#   kube-state-metrics  - PVC/PV phase metrics (portable with kube-prometheus-stack)
+#   kubelet             - kubelet_volume_stats_* (portable; requires kubelet scraping)
+#   node-exporter       - node_disk_io_time_seconds_total (portable)
+#   fault-injector      - pvc_canary_write_success (POC-only; deploy a canary exporter in prod)
+#
+# Note: NodeDiskReadErrors / NodeDiskWriteErrors are intentionally omitted.
+# Standard node-exporter on kind/local disks does not expose hardware I/O error
+# counters. In production, use SMART/NVMe textfile collectors or newer node-exporter
+# features. This POC uses pvc_canary_write_success for active I/O failure detection.
+#
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pvc-integrity-alerts
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: __HELM_RELEASE__
+spec:
+  groups:
+    - name: pvc.integrity
+      interval: 15s
+      rules:
+        # demo: make demo-unbound
+        # metric: kube-state-metrics (kube_persistentvolumeclaim_status_phase)
+        - alert: PVCNotBound
+          expr: |
+            kube_persistentvolumeclaim_status_phase{phase!="Bound"} == 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is not Bound"
+            description: "Phase is {{ $labels.phase }}. Check PV availability and StorageClass."
+
+        # demo: (none - requires PV deletion / cluster event)
+        # metric: kube-state-metrics (kube_persistentvolumeclaim_status_phase)
+        - alert: PVCLost
+          expr: |
+            kube_persistentvolumeclaim_status_phase{phase="Lost"} == 1
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is Lost"
+            description: "Underlying PV has been deleted or is unavailable. Data may be gone."
+
+        # demo: make demo-fill
+        # metric: kubelet (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes)
+        - alert: PVCFillingUp
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes
+              / kubelet_volume_stats_capacity_bytes
+            ) > 0.80
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full"
+            description: "Namespace: {{ $labels.namespace }}. Check disk usage."
+
+        # demo: (none - raise demo-fill targetPercent above 95, or fill manually)
+        # metric: kubelet (kubelet_volume_stats_*)
+        - alert: PVCAlmostFull
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes
+              / kubelet_volume_stats_capacity_bytes
+            ) > 0.95
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} is critically full (>95%)"
+
+        # demo: make demo-inodes
+        # metric: kubelet (kubelet_volume_stats_inodes_used / kubelet_volume_stats_inodes)
+        - alert: PVCInodesExhausted
+          expr: |
+            (
+              kubelet_volume_stats_inodes_used
+              / kubelet_volume_stats_inodes
+            ) > 0.85
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} inode usage > 85%"
+
+        # demo: (none - requires PV failure / cluster event)
+        # metric: kube-state-metrics (kube_persistentvolume_status_phase)
+        - alert: PVFailed
+          expr: |
+            kube_persistentvolume_status_phase{phase="Failed"} == 1
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PersistentVolume {{ $labels.persistentvolume }} is in Failed state"
+
+        # demo: (none - delete PVC while retaining PV, or cluster event)
+        # metric: kube-state-metrics (kube_persistentvolume_status_phase)
+        - alert: PVReleased
+          expr: |
+            kube_persistentvolume_status_phase{phase="Released"} == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PersistentVolume {{ $labels.persistentvolume }} is Released but not reclaimed"
+
+        # demo: (none - node-level I/O load; not injected by this POC)
+        # metric: node-exporter (node_disk_io_time_seconds_total)
+        - alert: NodeDiskIOSaturation
+          expr: |
+            rate(node_disk_io_time_seconds_total[2m]) > 0.9
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk I/O saturation > 90% on {{ $labels.instance }}/{{ $labels.device }}"
+
+        # demo: make demo-readonly | make demo-io-fault
+        # metric: fault-injector custom gauge (pvc_canary_write_success) - not from kube-state-metrics/kubelet
+        - alert: PVCWriteCanaryFailed
+          expr: |
+            pvc_canary_write_success == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC write canary probe failing on {{ $labels.pvc }}"
+            description: "Active I/O test writes are failing. Storage may be read-only or I/O erroring."

@@ -1,0 +1,107 @@
+# kind runs controller-manager, scheduler, etcd, and proxy on localhost - not scrapable
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeScheduler:
+  enabled: false
+
+defaultRules:
+  rules:
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    etcd: false
+
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 24h
+    # Discover ServiceMonitors in any namespace (required for SM in app ns on chart v38+).
+    ruleNamespaceSelector: {}
+    ruleSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: Exists
+    serviceMonitorSelector: {}
+    serviceMonitorSelectorNilUsesHelmValues: false
+    # Direct scrape fallback if ServiceMonitor discovery is delayed or misconfigured.
+    additionalScrapeConfigs:
+      - job_name: fault-injector-canary
+        metrics_path: /metrics
+        static_configs:
+          - targets:
+              - fault-injector.__APP_NAMESPACE__.svc.cluster.local:8080
+
+alertmanager:
+  alertmanagerSpec:
+    retention: 12h
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: [alertname, namespace, persistentvolumeclaim]
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 5m
+      receiver: "null"
+      routes:
+        - matchers:
+            - alertname =~ "PVC.*"
+          receiver: "pvc-alerts"
+    receivers:
+      - name: "null"
+      - name: "pvc-alerts"
+        webhook_configs:
+          - url: "http://fault-injector.__APP_NAMESPACE__.svc.cluster.local:8080/alerts"
+            send_resolved: true
+
+kube-state-metrics:
+  enabled: true
+  collectors:
+    - persistentvolumeclaims
+    - persistentvolumes
+    - pods
+    - nodes
+  metricLabelsAllowlist:
+    - persistentvolumeclaims=[*]
+    - persistentvolumes=[*]
+
+prometheus-node-exporter:
+  enabled: true
+  extraArgs:
+    - --collector.filesystem
+    - --collector.diskstats
+    - --collector.meminfo
+  hostPID: true
+  hostNetwork: true
+
+grafana:
+  enabled: true
+  adminPassword: "poc-admin"
+  # Chaos Mesh events datasource (requires make deploy-chaos - chaos-dashboard API on :2333).
+  # https://chaos-mesh.org/docs/use-grafana-data-source/
+  plugins:
+    - chaosmeshorg-datasource
+  grafana.ini:
+    plugins:
+      allow_loading_unsigned_plugins: chaosmeshorg-datasource
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Chaos Mesh
+      type: chaosmeshorg-datasource
+      uid: chaosmesh
+      access: proxy
+      url: http://chaos-dashboard.__CHAOS_HELM_NAMESPACE__.svc.cluster.local:2333
+      isDefault: false

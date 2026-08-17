@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fault-injector
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: fault-injector
+  template:
+    metadata:
+      labels:
+        app: fault-injector
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: fault-injector
+      containers:
+        - name: fault-injector
+          image: fault-injector:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: healthy
+              mountPath: /data/healthy
+            - name: filling
+              mountPath: /data/filling
+            - name: fault
+              mountPath: /data/fault
+          env:
+            - name: PVC_MOUNTS
+              value: "healthy:/data/healthy,filling:/data/filling,fault:/data/fault"
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: kube-api-access
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  expirationSeconds: 3607
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+        - name: healthy
+          persistentVolumeClaim:
+            claimName: pvc-healthy
+        - name: filling
+          persistentVolumeClaim:
+            claimName: pvc-filling
+        - name: fault
+          persistentVolumeClaim:
+            claimName: pvc-fault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fault-injector
+  namespace: default
+  labels:
+    app: fault-injector
+spec:
+  selector:
+    app: fault-injector
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

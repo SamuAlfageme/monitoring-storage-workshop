@@ -1,0 +1,11 @@
+# Optional dedicated namespace when default enforces Pod Security baseline.
+# Usage: kubectl apply -f fault-injector/k8s/namespace-poc.yaml
+#        make deploy-remote APP_NAMESPACE=pvc-monitoring-poc ...
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pvc-monitoring-poc
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
