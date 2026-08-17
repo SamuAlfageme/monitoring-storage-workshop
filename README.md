@@ -43,8 +43,15 @@ make port-forward       # in a separate terminal
 
 Uses your **current kubectl context** by default. Override with `KUBE_CONTEXT=my-context` when needed.
 
+A GitHub Action publishes `fault-injector/` to GHCR on pushes to `main` (and `v*` tags) as `ghcr.io/<owner>/fault-injector`. For this repo that is `ghcr.io/samualfageme/fault-injector:latest`. After the first publish, set the package visibility to **public** under GitHub Packages if pulls fail with `unauthorized`.
+
 ```bash
-# Private registry: create pull secret first (copy registry-credentials.env.example)
+# Public GHCR image (no pull secret):
+make deploy-remote \
+  STORAGE_CLASS=standard \
+  REMOTE_IMAGE=ghcr.io/samualfageme/fault-injector:latest
+
+# Private registry: create a pull secret first, then build/push your own image.
 cp fault-injector/k8s/registry-credentials.env.example fault-injector/k8s/registry-credentials.env
 # edit registry-credentials.env, then:
 make create-pull-secret APP_NAMESPACE=default
@@ -349,6 +356,7 @@ Removes injected faults (app + IOChaos) and deletes the unbound PVC. Alerts shou
 ## Project layout
 
 ```
+├── .github/workflows/        # GHCR publish for the fault-injector image
 ├── kind-config.yaml          # kind cluster with volume mounts
 ├── storage/                  # kind: StorageClass, local PVs, PVCs
 │   └── remote/               # dynamic PVCs for real clusters
